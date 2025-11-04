@@ -4,7 +4,7 @@ const mysql = require("mysql2");
 
 const app = express();
 
-// Middleware - Allow your Netlify frontend
+// Middleware
 app.use(cors({
   origin: [
     'http://localhost:3000',
@@ -14,47 +14,46 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Database connection with environment variables for production
-const db = mysql.createConnection({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "bakery",
-  port: process.env.DB_PORT || 3306,
-  // Add connection pooling for better performance
-  acquireTimeout: 60000,
-  timeout: 60000,
-  reconnect: true
+// Database connection for Railway
+const dbConfig = {
+  host: process.env.MYSQLHOST || process.env.DB_HOST || "localhost",
+  user: process.env.MYSQLUSER || process.env.DB_USER || "root",
+  password: process.env.MYSQLPASSWORD || process.env.DB_PASSWORD || "",
+  database: process.env.MYSQLDATABASE || process.env.DB_NAME || "bakery",
+  port: process.env.MYSQLPORT || process.env.DB_PORT || 3306
+};
+
+console.log('Database config:', {
+  host: dbConfig.host,
+  user: dbConfig.user,
+  database: dbConfig.database,
+  port: dbConfig.port
 });
 
-// Improved connection handling with retries
-function connectWithRetry() {
-  db.connect((err) => {
-    if (err) {
-      console.error("❌ Database connection failed:", err.message);
-      console.log("🔄 Retrying connection in 5 seconds...");
-      setTimeout(connectWithRetry, 5000);
-    } else {
-      console.log("✅ Connected to MySQL database:", process.env.DB_NAME || "bakery");
-      initializeDatabase();
-    }
-  });
-}
+const db = mysql.createConnection(dbConfig);
 
-connectWithRetry();
-
-// Handle database disconnections
-db.on('error', (err) => {
-  console.error('Database error:', err);
-  if (err.code === 'PROTOCOL_CONNECTION_LOST') {
-    console.log('Reconnecting to database...');
-    connectWithRetry();
+// Connect to database
+db.connect((err) => {
+  if (err) {
+    console.error("❌ Database connection failed:", err.message);
+    console.log("Retrying connection in 5 seconds...");
+    setTimeout(() => {
+      db.connect((retryErr) => {
+        if (retryErr) {
+          console.error("❌ Retry failed:", retryErr.message);
+        } else {
+          console.log("✅ Connected to MySQL database on retry");
+          initializeDatabase();
+        }
+      });
+    }, 5000);
   } else {
-    throw err;
+    console.log("✅ Connected to MySQL database:", dbConfig.database);
+    initializeDatabase();
   }
 });
 
-// Initialize database with sample data
+// Initialize database tables
 function initializeDatabase() {
   const createTableQuery = `
     CREATE TABLE IF NOT EXISTS orders (
@@ -106,6 +105,7 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Bakery Order Management API", 
     status: "Running",
+    database: "MySQL",
     timestamp: new Date().toISOString()
   });
 });
@@ -254,17 +254,6 @@ app.delete("/api/orders/:id", (req, res) => {
       }
     });
   });
-});
-
-// Handle 404 errors
-app.use((req, res) => {
-  res.status(404).json({ error: "Endpoint not found" });
-});
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error("Unhandled error:", err);
-  res.status(500).json({ error: "Internal server error" });
 });
 
 const PORT = process.env.PORT || 5000;
